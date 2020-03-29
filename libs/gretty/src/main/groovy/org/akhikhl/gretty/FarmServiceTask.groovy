@@ -24,6 +24,12 @@ abstract class FarmServiceTask extends DefaultTask {
 
   String farmName = ''
 
+  /**
+   * Please don't use servicePort, it will be removed in Gretty 2.0
+   */
+  @Deprecated
+  Integer servicePort
+
   @TaskAction
   void action() {
     String command = getCommand()
@@ -42,7 +48,7 @@ abstract class FarmServiceTask extends DefaultTask {
     int servicePort = portProps.servicePort as int
     //
     log.debug 'Sending command {} to port {}', command, servicePort
-    ServiceProtocol.createWriter(servicePort).write(command)
+    ServiceProtocol.send(servicePort, command)
   }
 
   abstract String getCommand()

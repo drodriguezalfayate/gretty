@@ -28,7 +28,7 @@ class JettyServerStartInfo {
 
   Map getInfo(server, JettyConfigurer configurer, Map params) {
 
-    def portsInfo = server.getConnectors().collect { it.localPort }
+    def portsInfo = server.getConnectors().collect { it.port }
     portsInfo = (portsInfo.size() == 1 ? 'port ' : 'ports ') + portsInfo.join(', ')
     log.info '{} started and listening on {}', params.servletContainerDescription, portsInfo
 
@@ -50,24 +50,24 @@ class JettyServerStartInfo {
         String contextPath = handler.getContextPath()
         if(httpConn) {
           String host = httpConn.host == '0.0.0.0' ? 'localhost' : httpConn.host          
-          log.info '  http://{}:{}{}', host, httpConn.localPort, contextPath
+          log.info '  http://{}:{}{}', host, httpConn.port, contextPath
           contextInfo.add([
             protocol: 'http',
             host: host,
-            port: httpConn.localPort,
+            port: httpConn.port,
             contextPath: contextPath,
-            baseURI: "http://${host}:${httpConn.localPort}${contextPath}"
+            baseURI: "http://${host}:${httpConn.port}${contextPath}"
           ])
         }
         if(httpsConn) {
           String host = httpsConn.host == '0.0.0.0' ? 'localhost' : httpsConn.host
-          log.info '  https://{}:{}{}', host, httpsConn.localPort, contextPath
+          log.info '  https://{}:{}{}', host, httpsConn.port, contextPath
           contextInfo.add([
             protocol: 'https',
             host: host,
-            port: httpsConn.localPort,
+            port: httpsConn.port,
             contextPath: contextPath,
-            baseURI: "https://${host}:${httpsConn.localPort}${contextPath}"
+            baseURI: "https://${host}:${httpsConn.port}${contextPath}"
           ])
         }
       }
@@ -82,10 +82,10 @@ class JettyServerStartInfo {
       serverStartInfo.host = 'localhost'
 
     if(httpConn)
-      serverStartInfo.httpPort = httpConn.localPort
+      serverStartInfo.httpPort = httpConn.port
 
     if(httpsConn)
-      serverStartInfo.httpsPort = httpsConn.localPort
+      serverStartInfo.httpsPort = httpsConn.port
 
     serverStartInfo.contexts = contextInfo
     serverStartInfo

@@ -12,11 +12,12 @@ import groovy.json.JsonBuilder
 import groovy.json.JsonSlurper
 import groovy.transform.CompileStatic
 import groovy.transform.TypeCheckingMode
-import org.apache.commons.io.IOUtils
+
+import java.util.concurrent.Executors
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Future
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
-
-import java.util.concurrent.Future
 
 /**
  *
@@ -25,20 +26,60 @@ import java.util.concurrent.Future
 @CompileStatic(TypeCheckingMode.SKIP)
 abstract class LauncherBase implements Launcher {
 
+  protected static int[] findFreePorts(int count, List<Integer> range = null) {
+    List result = []
+    try {
+      List sockets = []
+      try {
+        if(!range) {
+          while(count-- > 0) {
+            ServerSocket socket = new ServerSocket(0)
+            sockets.add(socket)
+            result.add(socket.getLocalPort())
+          }
+        } else {
+          for(Integer port in range) {
+            try {
+              ServerSocket socket = new ServerSocket(port)
+              sockets.add(socket)
+              result.add(socket.getLocalPort())
+              if(--count == 0) {
+                break;
+              }
+            } catch (IOException io) { }
+          }
+          if(count > 0) {
+            throw new IllegalStateException("Unable to find enough ports");
+          }
+        }
+      } finally {
+        for(ServerSocket socket in sockets)
+          socket.close()
+      }
+    } catch (IOException e) {
+    }
+    return result as int[]
+  }
+
   protected static final Logger log = LoggerFactory.getLogger(LauncherBase)
 
   protected final LauncherConfig config
   protected final ServerConfig sconfig
   protected final Iterable<WebAppConfig> webAppConfigs
+  protected ExecutorService executorService
 
-  protected ServiceProtocol.Reader reader
-  protected ServiceProtocol.Writer writer
+  protected int servicePort = -1
+  protected int statusPort = -1
+
+  protected AsyncResponse asyncResponse
+
   protected Map serverStartInfo
 
   LauncherBase(LauncherConfig config) {
     this.config = config
     sconfig = config.getServerConfig()
     webAppConfigs = config.getWebAppConfigs()
+    executorService = Executors.newSingleThreadExecutor()
   }
 
   protected void afterJavaExec() {
@@ -47,6 +88,7 @@ abstract class LauncherBase implements Launcher {
   @Override
   void afterLaunch() {
     getPortPropertiesFile().delete()
+    asyncResponse = null
   }
 
   protected void beforeJavaExec() {
@@ -54,9 +96,6 @@ abstract class LauncherBase implements Launcher {
 
   @Override
   void beforeLaunch() {
-    reader = ServiceProtocol.createReader()
-    log.debug 'statusPort: {}', reader.port
-
     File portPropertiesFile = getPortPropertiesFile()
     portPropertiesFile.parentFile.mkdirs()
     if(portPropertiesFile.exists()) {
@@ -66,18 +105,24 @@ abstract class LauncherBase implements Launcher {
       }
       int servicePort = portProps.servicePort as int
       int statusPort = portProps.statusPort as int
-      ServiceProtocol.createReader(statusPort).withCloseable { reader ->
-        def response = reader.readMessageAsync()
-        ServiceProtocol.createWriter(servicePort).write('status')
-        if (response.get() == 'started')
-          throw new RuntimeException('Web-server is already running.')
-      }
+      def asyncResponse = new AsyncResponse(executorService, statusPort)
+      if(asyncResponse.getStatus(servicePort) == 'started')
+        throw new RuntimeException('Web-server is already running.')
     }
+    (servicePort, statusPort) = findFreePorts(2, sconfig.auxPortRange)
+    log.debug 'servicePort: {}, statusPort: {}', servicePort, statusPort
+    Properties props = new Properties()
+    props.servicePort = servicePort as String
+    props.statusPort = statusPort as String
+    portPropertiesFile.withWriter 'UTF-8', {
+      props.store(it, null)
+    }
+    asyncResponse = new AsyncResponse(executorService, statusPort)
   }
 
   @Override
   void dispose() {
-    reader?.with { IOUtils.closeQuietly(it) }
+    executorService.shutdown()
   }
 
   protected static fileToString(file) {
@@ -124,8 +169,8 @@ abstract class LauncherBase implements Launcher {
               rebuildWebapps()
             }
             log.debug 'Sending command: {}', 'restartWithEvent'
-            def futureResponse = reader.readMessageAsync()
-            writer.write('restartWithEvent')
+            def futureResponse = asyncResponse.getResponse()
+            ServiceProtocol.send(servicePort, 'restartWithEvent')
             // Waiting for restart complete event
             def status = futureResponse.get()
             log.debug "Received status: ${status}"
@@ -180,7 +225,13 @@ abstract class LauncherBase implements Launcher {
       prepareToRun(wconfig)
 
     Thread thread
-    Future futureResponse = reader.readMessageAsync()
+
+    def status = asyncResponse.getStatus(servicePort)
+
+    if(status == 'started')
+      throw new RuntimeException('Web-server is already running.')
+
+    Future futureResponse = asyncResponse.getResponse()
 
     thread = Thread.start {
       for(Closure c in sconfig.onStart) {
@@ -193,7 +244,7 @@ abstract class LauncherBase implements Launcher {
         try {
           JavaExecParams params = new JavaExecParams()
           params.main = 'org.akhikhl.gretty.Runner'
-          params.args = ["--statusPort=${reader.port}", "--serverManagerFactory=${getServerManagerFactory()}"]
+          params.args = [ "--servicePort=${servicePort}", "--statusPort=${statusPort}", "--serverManagerFactory=${getServerManagerFactory()}" ]
           params.debug = config.getDebug()
           params.debugSuspend = config.getDebugSuspend()
           params.debugPort = config.getDebugPort()
@@ -218,27 +269,14 @@ abstract class LauncherBase implements Launcher {
       }
     }
 
-    def response = futureResponse.get()
-    log.debug "Response {}", response
-    if (response == 'started')
-      throw new RuntimeException('Web-server is already running.')
+    futureResponse.get()
 
-    int servicePort = response.substring("init ".length()) as Integer
-    writer = ServiceProtocol.createWriter(servicePort)
-
-    Properties props = new Properties()
-    props.servicePort = servicePort as String
-    props.statusPort = reader.port as String
-    portPropertiesFile.withWriter 'UTF-8', {
-      props.store(it, null)
-    }
-
-    futureResponse = reader.readMessageAsync()
+    futureResponse = asyncResponse.getResponse()
     def runConfigJson = getRunConfigJson()
-    log.debug 'Sending parameters to port {}', writer.port
+    log.debug 'Sending parameters to port {}', servicePort
     log.debug runConfigJson.toPrettyString()
-    writer.write(runConfigJson.toString())
-    def status = futureResponse.get()
+    ServiceProtocol.send(servicePort, runConfigJson.toString())
+    status = futureResponse.get()
     log.debug 'Got start status: {}', status
     serverStartInfo = new JsonSlurper().parseText(status)
 
@@ -256,7 +294,7 @@ abstract class LauncherBase implements Launcher {
 
   protected void stopServer() {
     log.debug 'Sending command: {}', 'stop'
-    writer.write('stop')
+    ServiceProtocol.send(servicePort, 'stop')
   }
 
   protected void writeLoggingConfig(json) {

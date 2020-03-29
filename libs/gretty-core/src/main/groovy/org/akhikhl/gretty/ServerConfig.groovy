@@ -20,7 +20,8 @@ import groovy.transform.TypeCheckingMode
 @ToString
 class ServerConfig {
 
-  static final int RANDOM_FREE_PORT = PortUtils.RANDOM_FREE_PORT
+  // attention: this constant must always have the same value as PortUtils.RANDOM_FREE_PORT
+  static final int RANDOM_FREE_PORT = -1
 
   List<String> jvmArgs
   Map<String, String> systemProperties
@@ -56,6 +57,18 @@ class ServerConfig {
   List<Closure> onScan
   List<Closure> onScanFilesChanged
 
+  /**
+   * Please don't use servicePort, it will be removed in Gretty 2.0
+   */
+  @Deprecated
+  Integer servicePort
+
+  /**
+   * Please don't use statusPort, it will be removed in Gretty 2.0
+   */
+  @Deprecated
+  Integer statusPort
+
   Boolean secureRandom
   String springBootVersion
   String springLoadedVersion
@@ -69,6 +82,8 @@ class ServerConfig {
 
   String redeployMode
   String scanner
+
+  List<Integer> auxPortRange
 
   String portPropertiesFileName
 

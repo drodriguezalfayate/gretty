@@ -261,11 +261,11 @@ abstract class BaseScannerManager implements ScannerManager {
             int servicePort = portProps.servicePort as int
             if(sconfig.redeployMode == 'restart') {
                 onBeforeRestart?.call()
-                ServiceProtocol.createWriter(servicePort).write('restartWithEvent')
+                ServiceProtocol.send(servicePort, 'restartWithEvent')
                 onRestart?.call()
             } else if(sconfig.redeployMode == 'redeploy') {
                 onBeforeReload?.call()
-                ServiceProtocol.createWriter(servicePort).write("redeploy ${webAppConfigsToRestart.collect {it.contextPath}.toSet().join(' ')}")
+                ServiceProtocol.send(servicePort, "redeploy ${webAppConfigsToRestart.collect {it.contextPath}.toSet().join(' ')}")
                 onReload?.call()
             } else {
                 throw new IllegalStateException("Unknown redeployMode: ${sconfig.redeployMode}")

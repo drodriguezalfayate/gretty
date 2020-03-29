@@ -69,13 +69,13 @@ class DefaultLauncher extends LauncherBase {
       //
       Future response
       scannerManager?.registerRestartCallbacks(
-              { -> response = reader.readMessageAsync() },
+              { -> response = asyncResponse.getResponse() },
               { -> response.get(); optionalLiveReloadServer.triggerReload() }
       )
       //
       Future response2
       scannerManager?.registerReloadCallbacks(
-              { -> response2 = reader.readMessageAsync() },
+              { -> response2 = asyncResponse.getResponse() },
               { -> response2.get(); optionalLiveReloadServer.triggerReload() }
       )
     }

@@ -27,29 +27,25 @@ final class Runner {
 
   protected final Map params
 
-  static class ServerStartEventImpl implements ServerStartEvent {
-    private final ServiceProtocol.Writer writer
-
-    ServerStartEventImpl(final ServiceProtocol.Writer writer) {
-      this.writer = writer
-    }
+  class ServerStartEventImpl implements ServerStartEvent {
 
     @Override
     void onServerStart(Map serverStartInfo) {
       JsonBuilder json = new JsonBuilder()
       json serverStartInfo
-      writer.writeMayFail(json.toString())
+      ServiceProtocol.sendMayFail((int) params.statusPort, json.toString())
     }
   }
 
   static void main(String[] args) {
     def cli = new CliBuilder()
     cli.with {
+      sv longOpt: 'servicePort', required: true, args: 1, argName: 'servicePort', type: Integer, 'service port'
       st longOpt: 'statusPort', required: true, args: 1, argName: 'statusPort', type: Integer, 'status port'
       smf longOpt: 'serverManagerFactory', required: true, args: 1, argName: 'serverManagerFactory', type: String, 'server manager factory'
     }
     def options = cli.parse(args)
-    Map params = [statusPort: options.statusPort as int, serverManagerFactory: options.serverManagerFactory]
+    Map params = [ servicePort: options.servicePort as int, statusPort: options.statusPort as int, serverManagerFactory: options.serverManagerFactory ]
     new Runner(params).run()
   }
 
@@ -112,26 +108,25 @@ final class Runner {
     def ServerManagerFactory = Class.forName(params.serverManagerFactory, true, this.getClass().classLoader)
     ServerManager serverManager = ServerManagerFactory.createServerManager()
 
-    final def reader = ServiceProtocol.createReader()
-    final def writer = ServiceProtocol.createWriter(params.statusPort)
+    ServerSocket socket = new ServerSocket(params.servicePort, 1, InetAddress.getByName('127.0.0.1'))
     try {
-      writer.write("init ${reader.port}")
+      ServiceProtocol.send(params.statusPort, 'init')
       while(true) {
-        def data = reader.readMessage()
+        def data = ServiceProtocol.readMessageFromServerSocket(socket)
         if(!paramsLoaded) {
           params << new JsonSlurper().parseText(data)
           paramsLoaded = true
           if(!Boolean.valueOf(System.getProperty('grettyProduct')))
             initLogback(params)
           serverManager.setParams(params)
-          serverManager.startServer(new ServerStartEventImpl(writer))
+          serverManager.startServer(new ServerStartEventImpl())
           // Note that server is already in listening state.
           // If client sends a command immediately after 'started' signal,
           // the command is queued, so that socket.accept gets it anyway.
           continue
         }
         if(data == 'status')
-          writer.write('started')
+          ServiceProtocol.send(params.statusPort, 'started')
         else if(data == 'stop') {
           serverManager.stopServer()
           break
@@ -147,11 +142,11 @@ final class Runner {
         else if (data.startsWith('redeploy ')) {
           List<String> webappList = data.replace('redeploy ', '').split(' ').toList()
           serverManager.redeploy(webappList)
-          writer.writeMayFail('redeployed')
+          ServiceProtocol.sendMayFail(params.statusPort, 'redeployed')
         }
       }
     } finally {
-      reader.close()
+      socket.close()
     }
   }
 }

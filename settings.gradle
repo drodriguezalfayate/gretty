@@ -1,7 +1,6 @@
 rootProject.name = rootProjectName
 include 'libs:gretty-core'
 include 'libs:gretty'
-include 'libs:gretty-common'
 include 'libs:gretty-filter'
 include 'libs:gretty-runner'
 include 'libs:gretty-runner-jetty'
